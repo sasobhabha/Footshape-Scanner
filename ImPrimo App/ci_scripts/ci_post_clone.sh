@@ -19,11 +19,28 @@ else
     fi
 fi
 
-# Avoid homebrew auto update to save build time
-export HOMEBREW_NO_AUTO_UPDATE=1
+# Set up local gem environment for user-space installation
+export GEM_HOME=$HOME/.gem
+export PATH=$GEM_HOME/bin:$PATH
 
-echo "Installing CocoaPods via Homebrew..."
-brew install cocoapods
+# Add standard Homebrew paths just in case it is installed but not in PATH
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-echo "Installing dependencies via CocoaPods..."
+if command -v pod >/dev/null 2>&1; then
+    echo "CocoaPods is already installed."
+else
+    echo "CocoaPods not found. Installing..."
+    
+    if command -v brew >/dev/null 2>&1; then
+        echo "Installing CocoaPods via Homebrew..."
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        brew install cocoapods
+    else
+        echo "Homebrew not found. Installing CocoaPods via Gem..."
+        gem install cocoapods --user-install --no-document
+    fi
+fi
+
+# Run pod install
+echo "Installing project dependencies..."
 pod install
