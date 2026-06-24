@@ -8,4 +8,4 @@ The application automatically converts the scanned footshape into high-quality *
 
 ## Tech Stack
 * **iOS App**: Swift, Apple ARKit, and StandardCyborg Fusion SDK
-* **Backend Engine**: Python and Django for mesh processing
+* **Backend Engine**: Python for mesh processing
