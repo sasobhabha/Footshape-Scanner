@@ -243,26 +243,11 @@ class ViewController: UIViewController, ScanningViewControllerDelegate, UIDocume
             let plyURL = self.documentsURL.appendingPathComponent("FootScan.ply")
             let objURL = self.documentsURL.appendingPathComponent("FootScan.obj")
             let usdzURL = self.documentsURL.appendingPathComponent("FootScan.usdz")
-            let stlURL = self.documentsURL.appendingPathComponent("FootScan.stl")
-            let meshedPLYURL = self.documentsURL.appendingPathComponent("FootScan_meshed.ply")
             
             // StandardCyborg local file writers (run on device GPU/CPU)
             let plySuccess = pointCloud.writeToPLY(atPath: plyURL.path)
             let objSuccess = pointCloud.writeToOBJ(atPath: objURL.path)
             let usdzSuccess = pointCloud.writeToUSDZ(atPath: usdzURL.path)
-            
-            // Perform PrimoEngine Solid/Meshing process natively on device
-            let meshingOperation = SCMeshingOperation(inputPLYPath: plyURL.path, outputPLYPath: meshedPLYURL.path)
-            meshingOperation.parameters.closed = true
-            meshingOperation.parameters.resolution = 5 // solidResolution
-            meshingOperation.parameters.smoothness = 2
-            meshingOperation.start()
-            
-            var stlSuccess = false
-            if meshingOperation.error == nil {
-                let mesh = SCMesh(plyPath: meshedPLYURL.path, jpegPath: "")
-                stlSuccess = self.writeSTL(from: mesh, to: stlURL)
-            }
             
             if let thumbnail = thumbnail,
                let jpegData = thumbnail.jpegData(compressionQuality: 0.8) {
@@ -271,32 +256,28 @@ class ViewController: UIViewController, ScanningViewControllerDelegate, UIDocume
             
             DispatchQueue.main.async {
                 progressAlert.dismiss(animated: true) {
-                    if plySuccess && objSuccess && usdzSuccess && stlSuccess {
+                    if plySuccess && objSuccess && usdzSuccess {
                         self.lastScanPointCloud = pointCloud
                         self.lastScanThumbnail = thumbnail
                         self.lastScanDate = Date()
                         self.updateUI()
                         
-                        self.presentLocalOptionsAlert(usdzURL: usdzURL, objURL: objURL, stlURL: stlURL)
+                        self.presentLocalOptionsAlert(usdzURL: usdzURL, objURL: objURL)
                     } else {
-                        self.showErrorAlert(message: "Failed to generate local 3D models (including STL).")
+                        self.showErrorAlert(message: "Failed to generate local 3D models.")
                     }
                 }
             }
         }
     }
 
-    private func presentLocalOptionsAlert(usdzURL: URL, objURL: URL, stlURL: URL) {
+    private func presentLocalOptionsAlert(usdzURL: URL, objURL: URL) {
         let alert = UIAlertController(title: "Scan Processed",
                                       message: "Your local 3D Footshape model has been successfully generated.",
                                       preferredStyle: .actionSheet)
         
         let previewAction = UIAlertAction(title: "Preview in AR", style: .default) { [weak self] _ in
             self?.previewLocalModel(usdzURL: usdzURL)
-        }
-        
-        let saveSTLAction = UIAlertAction(title: "Save STL Model (3D Print)", style: .default) { [weak self] _ in
-            self?.exportLocalFile(url: stlURL)
         }
         
         let saveUSDZAction = UIAlertAction(title: "Save USDZ Model", style: .default) { [weak self] _ in
@@ -310,7 +291,6 @@ class ViewController: UIViewController, ScanningViewControllerDelegate, UIDocume
         let cancelAction = UIAlertAction(title: "Cancel", style: .cancel, handler: nil)
         
         alert.addAction(previewAction)
-        alert.addAction(saveSTLAction)
         alert.addAction(saveUSDZAction)
         alert.addAction(saveOBJAction)
         alert.addAction(cancelAction)
@@ -322,137 +302,6 @@ class ViewController: UIViewController, ScanningViewControllerDelegate, UIDocume
         }
         
         self.presentOnTop(alert, animated: true, completion: nil)
-    }
-    
-    private func writeSTL(from mesh: SCMesh, to url: URL) -> Bool {
-        let faceCount = mesh.faceCount
-        let vertexCount = mesh.vertexCount
-        guard faceCount > 0 && vertexCount > 0 else { return false }
-        
-        guard let positions = mesh.positionData,
-              let normals = mesh.normalData,
-              let faces = mesh.facesData else {
-            return false
-        }
-        
-        let bytesPerVertex = positions.count / vertexCount
-        let bytesPerNormal = normals.count > 0 ? normals.count / vertexCount : 0
-        let bytesPerIndex = faces.count / (faceCount * 3)
-        
-        guard bytesPerVertex >= 12 else { return false }
-        guard bytesPerIndex == 2 || bytesPerIndex == 4 else { return false }
-        
-        var data = Data()
-        var header = [UInt8](repeating: 0, count: 80)
-        let headerText = "Created by Footshape Scanner"
-        let headerBytes = Array(headerText.utf8)
-        for i in 0..<min(headerBytes.count, 80) {
-            header[i] = headerBytes[i]
-        }
-        data.append(contentsOf: header)
-        
-        var numFacets = UInt32(faceCount)
-        withUnsafeBytes(of: &numFacets) { data.append(contentsOf: $0) }
-        
-        positions.withUnsafeBytes { (positionsPointer: UnsafeRawBufferPointer) in
-            faces.withUnsafeBytes { (facesPointer: UnsafeRawBufferPointer) in
-                normals.withUnsafeBytes { (normalsPointer: UnsafeRawBufferPointer) in
-                    
-                    let getVertex: (Int) -> simd_float3 = { i in
-                        let offset = i * bytesPerVertex
-                        let x = positionsPointer.load(fromByteOffset: offset, as: Float.self)
-                        let y = positionsPointer.load(fromByteOffset: offset + 4, as: Float.self)
-                        let z = positionsPointer.load(fromByteOffset: offset + 8, as: Float.self)
-                        return simd_float3(x, y, z)
-                    }
-                    
-                    let getNormal: (Int) -> simd_float3 = { i in
-                        if bytesPerNormal >= 12 {
-                            let offset = i * bytesPerNormal
-                            let x = normalsPointer.load(fromByteOffset: offset, as: Float.self)
-                            let y = normalsPointer.load(fromByteOffset: offset + 4, as: Float.self)
-                            let z = normalsPointer.load(fromByteOffset: offset + 8, as: Float.self)
-                            return simd_float3(x, y, z)
-                        } else {
-                            return simd_float3(0, 0, 0)
-                        }
-                    }
-                    
-                    let getIndex: (Int) -> Int = { i in
-                        if bytesPerIndex == 4 {
-                            return Int(facesPointer.load(fromByteOffset: i * 4, as: Int32.self))
-                        } else {
-                            return Int(facesPointer.load(fromByteOffset: i * 2, as: Int16.self))
-                        }
-                    }
-                    
-                    let hasNormals = bytesPerNormal >= 12
-                    
-                    for f in 0..<faceCount {
-                        let idx0 = getIndex(f * 3 + 0)
-                        let idx1 = getIndex(f * 3 + 1)
-                        let idx2 = getIndex(f * 3 + 2)
-                        
-                        guard idx0 >= 0 && idx0 < vertexCount &&
-                              idx1 >= 0 && idx1 < vertexCount &&
-                              idx2 >= 0 && idx2 < vertexCount else {
-                            continue
-                        }
-                        
-                        let v0 = getVertex(idx0)
-                        let v1 = getVertex(idx1)
-                        let v2 = getVertex(idx2)
-                        
-                        var normal = simd_float3(0, 0, 0)
-                        if hasNormals {
-                            let n0 = getNormal(idx0)
-                            let n1 = getNormal(idx1)
-                            let n2 = getNormal(idx2)
-                            let sum = n0 + n1 + n2
-                            let len = simd_length(sum)
-                            normal = len > 0.0001 ? sum / len : simd_float3(0, 0, 0)
-                        } else {
-                            let edge1 = v1 - v0
-                            let edge2 = v2 - v0
-                            let cross = simd_cross(edge1, edge2)
-                            let len = simd_length(cross)
-                            normal = len > 0.0001 ? cross / len : simd_float3(0, 0, 0)
-                        }
-                        
-                        var nx = normal.x; var ny = normal.y; var nz = normal.z
-                        withUnsafeBytes(of: &nx) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &ny) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &nz) { data.append(contentsOf: $0) }
-                        
-                        var v0x = v0.x; var v0y = v0.y; var v0z = v0.z
-                        withUnsafeBytes(of: &v0x) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &v0y) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &v0z) { data.append(contentsOf: $0) }
-                        
-                        var v1x = v1.x; var v1y = v1.y; var v1z = v1.z
-                        withUnsafeBytes(of: &v1x) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &v1y) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &v1z) { data.append(contentsOf: $0) }
-                        
-                        var v2x = v2.x; var v2y = v2.y; var v2z = v2.z
-                        withUnsafeBytes(of: &v2x) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &v2y) { data.append(contentsOf: $0) }
-                        withUnsafeBytes(of: &v2z) { data.append(contentsOf: $0) }
-                        
-                        var attr: UInt16 = 0
-                        withUnsafeBytes(of: &attr) { data.append(contentsOf: $0) }
-                    }
-                }
-            }
-        }
-        
-        do {
-            try data.write(to: url)
-            return true
-        } catch {
-            print("Error writing STL data: \(error)")
-            return false
-        }
     }
     
     private func previewLocalModel(usdzURL: URL) {
