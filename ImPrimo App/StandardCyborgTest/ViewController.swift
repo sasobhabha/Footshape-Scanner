@@ -327,14 +327,20 @@ class ViewController: UIViewController, ScanningViewControllerDelegate, UIDocume
     private func writeSTL(from mesh: SCMesh, to url: URL) -> Bool {
         let faceCount = mesh.faceCount
         let vertexCount = mesh.vertexCount
-        guard faceCount > 0 else { return false }
+        guard faceCount > 0 && vertexCount > 0 else { return false }
         
-        guard let positions = mesh.positionData else { return false }
-        guard let normals = mesh.normalData else { return false }
-        guard let faces = mesh.facesData else { return false }
+        guard let positions = mesh.positionData,
+              let normals = mesh.normalData,
+              let faces = mesh.facesData else {
+            return false
+        }
         
-        guard positions.count >= vertexCount * MemoryLayout<simd_float3>.size else { return false }
-        guard faces.count >= faceCount * 3 * MemoryLayout<Int32>.size else { return false }
+        let bytesPerVertex = positions.count / vertexCount
+        let bytesPerNormal = normals.count > 0 ? normals.count / vertexCount : 0
+        let bytesPerIndex = faces.count / (faceCount * 3)
+        
+        guard bytesPerVertex >= 12 else { return false }
+        guard bytesPerIndex == 2 || bytesPerIndex == 4 else { return false }
         
         var data = Data()
         var header = [UInt8](repeating: 0, count: 80)
@@ -350,34 +356,67 @@ class ViewController: UIViewController, ScanningViewControllerDelegate, UIDocume
         
         positions.withUnsafeBytes { (positionsPointer: UnsafeRawBufferPointer) in
             faces.withUnsafeBytes { (facesPointer: UnsafeRawBufferPointer) in
-                let posPtr = positionsPointer.bindMemory(to: simd_float3.self)
-                let facesPtr = facesPointer.bindMemory(to: Int32.self)
-                
-                let hasNormals = normals.count >= vertexCount * MemoryLayout<simd_float3>.size
                 normals.withUnsafeBytes { (normalsPointer: UnsafeRawBufferPointer) in
-                    let normPtr = normalsPointer.bindMemory(to: simd_float3.self)
+                    
+                    let getVertex: (Int) -> simd_float3 = { i in
+                        let offset = i * bytesPerVertex
+                        let x = positionsPointer.load(fromByteOffset: offset, as: Float.self)
+                        let y = positionsPointer.load(fromByteOffset: offset + 4, as: Float.self)
+                        let z = positionsPointer.load(fromByteOffset: offset + 8, as: Float.self)
+                        return simd_float3(x, y, z)
+                    }
+                    
+                    let getNormal: (Int) -> simd_float3 = { i in
+                        if bytesPerNormal >= 12 {
+                            let offset = i * bytesPerNormal
+                            let x = normalsPointer.load(fromByteOffset: offset, as: Float.self)
+                            let y = normalsPointer.load(fromByteOffset: offset + 4, as: Float.self)
+                            let z = normalsPointer.load(fromByteOffset: offset + 8, as: Float.self)
+                            return simd_float3(x, y, z)
+                        } else {
+                            return simd_float3(0, 0, 0)
+                        }
+                    }
+                    
+                    let getIndex: (Int) -> Int = { i in
+                        if bytesPerIndex == 4 {
+                            return Int(facesPointer.load(fromByteOffset: i * 4, as: Int32.self))
+                        } else {
+                            return Int(facesPointer.load(fromByteOffset: i * 2, as: Int16.self))
+                        }
+                    }
+                    
+                    let hasNormals = bytesPerNormal >= 12
                     
                     for f in 0..<faceCount {
-                        let idx0 = Int(facesPtr[f * 3 + 0])
-                        let idx1 = Int(facesPtr[f * 3 + 1])
-                        let idx2 = Int(facesPtr[f * 3 + 2])
+                        let idx0 = getIndex(f * 3 + 0)
+                        let idx1 = getIndex(f * 3 + 1)
+                        let idx2 = getIndex(f * 3 + 2)
                         
-                        guard idx0 < vertexCount && idx1 < vertexCount && idx2 < vertexCount else { continue }
+                        guard idx0 >= 0 && idx0 < vertexCount &&
+                              idx1 >= 0 && idx1 < vertexCount &&
+                              idx2 >= 0 && idx2 < vertexCount else {
+                            continue
+                        }
                         
-                        let v0 = posPtr[idx0]
-                        let v1 = posPtr[idx1]
-                        let v2 = posPtr[idx2]
+                        let v0 = getVertex(idx0)
+                        let v1 = getVertex(idx1)
+                        let v2 = getVertex(idx2)
                         
                         var normal = simd_float3(0, 0, 0)
                         if hasNormals {
-                            let n0 = normPtr[idx0]
-                            let n1 = normPtr[idx1]
-                            let n2 = normPtr[idx2]
-                            normal = simd_normalize(n0 + n1 + n2)
+                            let n0 = getNormal(idx0)
+                            let n1 = getNormal(idx1)
+                            let n2 = getNormal(idx2)
+                            let sum = n0 + n1 + n2
+                            let len = simd_length(sum)
+                            normal = len > 0.0001 ? sum / len : simd_float3(0, 0, 0)
                         } else {
                             let edge1 = v1 - v0
                             let edge2 = v2 - v0
-                            normal = simd_normalize(simd_cross(edge1, edge2))
+                            let cross = simd_cross(edge1, edge2)
+                            let len = simd_length(cross)
+                            normal = len > 0.0001 ? cross / len : simd_float3(0, 0, 0)
                         }
                         
                         var nx = normal.x; var ny = normal.y; var nz = normal.z
