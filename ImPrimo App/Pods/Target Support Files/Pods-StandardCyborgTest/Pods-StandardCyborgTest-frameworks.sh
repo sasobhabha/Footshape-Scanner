@@ -176,14 +176,10 @@ code_sign_if_enabled() {
 }
 
 if [[ "$CONFIGURATION" == "Debug" ]]; then
-  install_framework "${BUILT_PRODUCTS_DIR}/Alamofire/Alamofire.framework"
-  install_framework "${BUILT_PRODUCTS_DIR}/Moya/Moya.framework"
   install_framework "${PODS_ROOT}/StandardCyborgFusion/ios/StandardCyborgFusion.framework"
   install_framework "${BUILT_PRODUCTS_DIR}/StandardCyborgUI/StandardCyborgUI.framework"
 fi
 if [[ "$CONFIGURATION" == "Release" ]]; then
-  install_framework "${BUILT_PRODUCTS_DIR}/Alamofire/Alamofire.framework"
-  install_framework "${BUILT_PRODUCTS_DIR}/Moya/Moya.framework"
   install_framework "${PODS_ROOT}/StandardCyborgFusion/ios/StandardCyborgFusion.framework"
   install_framework "${BUILT_PRODUCTS_DIR}/StandardCyborgUI/StandardCyborgUI.framework"
 fi

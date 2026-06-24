@@ -5,7 +5,6 @@ target 'StandardCyborgTest' do
  
   pod 'StandardCyborgFusion'
   pod 'StandardCyborgUI'
-  pod 'Moya'
 end
 
 post_install do |installer|
