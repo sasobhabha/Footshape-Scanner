@@ -1,0 +1,17 @@
+{
+  "name": "footshape-api",
+  "main": "src/index.js",
+  "compatibility_date": "2024-03-20",
+  "routes": [
+    {
+      "pattern": "footshape.educhange.app",
+      "custom_domain": true
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SCANS_BUCKET",
+      "bucket_name": "footshape-scans"
+    }
+  ]
+}
